@@ -1,35 +1,64 @@
-require 'httparty'
+require 'json'
+require 'net/http'
 require 'date'
+
 
 USERNAME = ENV['USERNAME']
 ACCESS_TOKEN = ENV['ACCESS_TOKEN']
+URL = 'https://api.github.com/graphql'
+
+QUERY = <<~GRAPHQL
+  query($login: String!, $fromDate: DateTime!, $toDate: DateTime!) {
+    user(login: $login) {
+      contributionsCollection(from: $fromDate, to: $toDate) {
+        contributionCalendar {
+          totalContributions
+          weeks {
+            contributionDays {
+              contributionCount
+              date
+            }
+          }
+        }
+      }
+    }
+  }
+GRAPHQL
 
 def get_today_contributions(username, access_token)
-  # 今日の日付を取得
-  today = Date.today.strftime('%Y-%m-%d')
+  # 取得したい日付を指定
+  date = Date.today
 
-  # GitHub APIのエンドポイント
-  github_api_url = "https://api.github.com/users/#{username}/events"
+  # fromとtoの日付をDateTime型に変換
+  from_date = DateTime.new(date.year, date.month, date.day, 0, 0, 0)
+  to_date = DateTime.new(date.year, date.month, date.day, 23, 59, 59)
 
-  # GitHub APIにアクセスしてイベント情報を取得
-  response = HTTParty.get(github_api_url, headers: { 'Authorization' => "token #{access_token}" })
+  # リクエストボディを作成する
+  variables = { login: USERNAME, fromDate: from_date, toDate: to_date }
+  request_body = { query: QUERY, variables: variables }.to_json
 
-  # レスポンスを確認して本日のコミット数を計算
-  if response.code == 200
-    events = JSON.parse(response.body)
+  # リクエストを作成する
+  uri = URI(URL)
+  request = Net::HTTP::Post.new(uri)
+  request['Authorization'] = "bearer #{ACCESS_TOKEN}"
+  request['Content-Type'] = 'application/json'
+  request.body = request_body
 
-    # 本日のPushEvent（コミット）の数をカウント
-    today_commit_count = events.count do |event|
-      event['type'] == 'PushEvent' && Date.parse(event['created_at']).strftime('%Y-%m-%d') == today
-    end
-
-    return { statusCode: 200, body: today_commit_count }
-  else
-    return { statusCode: response.code, body: 'GitHub APIにアクセスできませんでした' }
+  # POSTを実行する
+  response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+    http.request(request)
   end
+
+  # レスポンスをパースして本日のコントリビューション数を取得する
+  github_response = JSON.parse(response.body)
+  p github_response
+  contribution_days = github_response.dig('data', 'user', 'contributionsCollection', 'contributionCalendar', 'weeks').flat_map { |week| week['contributionDays'] }
+  today_contribution_count = contribution_days.find { |day| day['date'] == date.strftime('%Y-%m-%d') }['contributionCount']
+
+  result = today_contribution_count
 end
 
 def lambda_handler(event:, context:)
-  # コントリビューションカレンダーを取得
+
   result = get_today_contributions(USERNAME, ACCESS_TOKEN)
 end
