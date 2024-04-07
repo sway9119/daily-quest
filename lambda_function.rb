@@ -1,6 +1,7 @@
 require 'json'
 require 'net/http'
 require 'date'
+require 'dotenv/load'
 
 
 USERNAME = ENV['USERNAME']
@@ -59,6 +60,5 @@ def get_today_contributions(username, access_token)
 end
 
 def lambda_handler(event:, context:)
-
   result = get_today_contributions(USERNAME, ACCESS_TOKEN)
 end
